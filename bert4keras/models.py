@@ -284,14 +284,15 @@ class Transformer(object):
         weight_value_pairs = []
         for layer, variables in mapping.items():
             layer = self.layers[layer]
-            weights, values = [], []
+            weights = layer.trainable_weights
+            values = []
 
-            for w, v in zip(layer.trainable_weights, variables):  # 允许跳过不存在的权重
+            for v in variables:  # 允许跳过不存在的权重
                 try:
                     values.append(self.load_variable(checkpoint, v))
-                    weights.append(w)
                 except Exception as e:
                     if self.ignore_invalid_weights:
+                        values.append(None)
                         print('%s, but ignored.' % e.message)
                     else:
                         raise e
@@ -309,18 +310,21 @@ class Transformer(object):
                 W = np.linalg.qr(np.random.randn(key_size, head_size))[0].T
                 if layer.attention_scale:
                     W = W * key_size**0.25 / head_size**0.25
-                for w in layer.trainable_weights[:count]:
-                    if w in weights:
-                        v = values[weights.index(w)]
-                        w_shape, v_shape = K.int_shape(w), v.shape
-                        if w_shape[-1] != v_shape[-1]:
-                            pre_shape = w_shape[:-1]
-                            v = v.reshape(pre_shape + (heads, head_size))
-                            v = np.dot(v, W)
-                            v = v.reshape(pre_shape + (heads * key_size,))
-                            values[weights.index(w)] = v
+                for i in range(count):
+                    w, v = weights[i], values[i]
+                    if v is None:
+                        continue
+                    w_shape, v_shape = K.int_shape(w), v.shape
+                    if w_shape[-1] != v_shape[-1]:
+                        pre_shape = w_shape[:-1]
+                        v = v.reshape(pre_shape + (heads, head_size))
+                        v = np.dot(v, W)
+                        v = v.reshape(pre_shape + (heads * key_size,))
+                        values[i] = v
 
-            weight_value_pairs.extend(zip(weights, values))
+            weight_value_pairs.extend([
+                (w, v) for w, v in zip(weights, values) if v is not None
+            ])
 
         K.batch_set_value(weight_value_pairs)
 
